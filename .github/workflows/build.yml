@@ -49,6 +49,9 @@ jobs:
           chmod 600 ~/.ssh/deploy_key
           ssh-keyscan -p 22 nikhilmakwana.in >> ~/.ssh/known_hosts
 
+      - name: Install rsync
+        run: sudo apt-get install -y rsync
+
       - name: Copy dist to VPS
         run: |
           rsync -avz --delete \
