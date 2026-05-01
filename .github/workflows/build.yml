@@ -1,0 +1,127 @@
+name: Build and Deploy
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    env:
+      VITE_APP_NAME: ${{ vars.VITE_APP_NAME || 'My Vite App' }}
+      VITE_APP_VERSION: ${{ vars.VITE_APP_VERSION || '1.0.0' }}
+      VITE_APP_DESCRIPTION: ${{ vars.VITE_APP_DESCRIPTION || 'This is a sample Vite application.' }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Verify env variables
+        run: |
+          echo "VITE_APP_NAME=$VITE_APP_NAME"
+          echo "VITE_APP_VERSION=$VITE_APP_VERSION"
+          echo "VITE_APP_DESCRIPTION=$VITE_APP_DESCRIPTION"
+
+      - name: Build
+        run: npm run build
+
+      - name: Verify env vars baked into build
+        run: |
+          grep -r "$VITE_APP_NAME" dist/ && echo "VITE_APP_NAME found in build" || echo "VITE_APP_NAME not found"
+          grep -r "$VITE_APP_VERSION" dist/ && echo "VITE_APP_VERSION found in build" || echo "VITE_APP_VERSION not found"
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+          retention-days: 7
+
+  deploy:
+    runs-on: ubuntu-latest
+    needs: build
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+
+    env:
+      VITE_APP_NAME: ${{ vars.VITE_APP_NAME || 'My Vite App' }}
+      VITE_APP_VERSION: ${{ vars.VITE_APP_VERSION || '1.0.0' }}
+      VITE_APP_DESCRIPTION: ${{ vars.VITE_APP_DESCRIPTION || 'This is a sample Vite application.' }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Setup SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -p 22 nikhilmakwana.in >> ~/.ssh/known_hosts
+
+      - name: Copy dist to VPS
+        run: |
+          rsync -avz --delete \
+            -e "ssh -i ~/.ssh/deploy_key -p 22" \
+            dist/ \
+            ubuntu@nikhilmakwana.in:/var/www/test-ci/
+
+      - name: Start app on port 3004
+        run: |
+          ssh -i ~/.ssh/deploy_key -p 22 ubuntu@nikhilmakwana.in << 'EOF'
+            # Install serve if not present
+            if ! command -v serve &> /dev/null; then
+              sudo npm install -g serve
+            fi
+
+            # Install PM2 if not present
+            if ! command -v pm2 &> /dev/null; then
+              sudo npm install -g pm2
+            fi
+
+            # Restart or start the app with PM2
+            if pm2 list | grep -q "test-ci"; then
+              pm2 restart test-ci
+            else
+              pm2 start "serve -s /var/www/test-ci -l 3004" --name test-ci
+            fi
+
+            pm2 save
+          EOF
+
+      - name: Verify deployment
+        run: |
+          sleep 3
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://nikhilmakwana.in:3004)
+          if [ "$STATUS" = "200" ]; then
+            echo "Deployment successful — app running at http://nikhilmakwana.in:3004"
+          else
+            echo "Deployment check failed with HTTP $STATUS"
+            exit 1
+          fi

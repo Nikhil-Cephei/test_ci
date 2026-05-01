@@ -16,10 +16,9 @@ function App() {
           <img src={viteLogo} className="vite" alt="Vite logo" />
         </div>
         <div>
-          <h1>Get started</h1>
-          <p>
-            Edit <code>src/App.tsx</code> and save to test <code>HMR</code>
-          </p>
+          <h1>{import.meta.env.VITE_APP_NAME}</h1>
+          <p>{import.meta.env.VITE_APP_DESCRIPTION}</p>
+          <p>Version: <code>{import.meta.env.VITE_APP_VERSION}</code></p>
         </div>
         <button
           type="button"
